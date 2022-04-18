@@ -1,0 +1,26 @@
+syntax = "proto3";
+package csce438;
+import "google/protobuf/timestamp.proto";
+
+service SYNCService{
+    rpc List(RequestOtherSynch) returns (ReplyOtherSynch) {}
+    rpc Follow(RequestFollow) returns (ReplyFollow) {}
+}
+
+message RequestFollow {
+    string username = 1;
+    string user_to_follow = 2;
+}
+
+message ReplyFollow {
+    string msg = 1;
+}
+
+message RequestOtherSynch {
+    string msg = 1;
+}
+
+message ReplyOtherSynch {
+    string msg = 1;
+    repeated string list_users = 2;
+}

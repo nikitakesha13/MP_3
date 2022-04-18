@@ -1,0 +1,47 @@
+syntax = "proto3";
+package csce438;
+import "google/protobuf/timestamp.proto";
+
+// ------------------------------------------------------------
+// This proto file is responsible for the CLIENT <-> COORDINATOR 
+// communication 
+// ------------------------------------------------------------
+service CCService{
+  rpc getServer (RequestHost) returns (ReplyHost) {}
+  rpc getFollowerSynch (RequestSynchData) returns (ReplySynchData) {}
+  rpc addServer (RequestServer) returns (ReplyServer) {}
+}
+
+// The request definition
+message RequestHost {
+    string username = 1;
+}
+
+message RequestServer {
+    string id = 1;
+    string port_num = 2;
+    string type = 3;
+}
+
+message RequestSynchData {
+    string id = 1;
+}
+
+// The response definition
+message ReplyHost {
+    string msg = 1;
+    string hostname = 2;
+    string port_num = 3;
+}
+
+message ReplyServer {
+    string msg = 1;
+    string name = 2;
+}
+
+message ReplySynchData {
+    string msg = 1;
+    repeated string id = 2;
+    repeated string hostname = 3;
+    repeated string port_num = 4;
+}
