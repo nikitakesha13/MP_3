@@ -2,6 +2,11 @@
 
 string server_id = "";
 string curr_id = "";
+string server_type;
+unique_ptr<CCService::Stub> stub_coor;
+unique_ptr<SNSService::Stub> stub_slave;
+string slave_host;
+string slave_port;
 
 class SNSServiceImpl final : public SNSService::Service {
   
@@ -50,6 +55,16 @@ class SNSServiceImpl final : public SNSService::Service {
     if (username == args){
       reply->set_msg("FAILURE_INVALID_USERNAME");
       return Status::OK;
+    }
+
+    if (server_type == "master"){
+      Request slave_request;
+      slave_request.set_username(username);
+      slave_request.add_arguments(args);
+      ClientContext slave_context;
+      Reply slave_reply;
+
+      Status status = stub_slave -> Follow(&slave_context, slave_request, &slave_reply);
     }
 
     // Determine is the username is in the same cluster
@@ -109,58 +124,6 @@ class SNSServiceImpl final : public SNSService::Service {
     
     return Status::OK;
   }
-
-  Status UnFollow(ServerContext* context, const Request* request, Reply* reply) override {
-    // ------------------------------------------------------------
-    // In this function, you are to write code that handles 
-    // request from a user to unfollow one of his/her existing
-    // followers
-    // ------------------------------------------------------------
-    string username = request->username();
-    string args;
-    for (auto x: request->arguments()){
-      args += x;
-    }
-    if (username == args){
-      reply->set_msg("FAILURE_INVALID_USERNAME");
-      return Status::OK;
-    }
-
-    ifstream ifs(server_id + "/" + args + ".txt");
-    if (!ifs.is_open()){
-      reply->set_msg("FAILURE_NOT_EXISTS");
-      return Status::OK; 
-    }
-
-    string args_username;
-    getline(ifs, args_username);
-
-    string args_followers;
-    getline(ifs, args_followers);
-    bool exists = false;
-    int pos = args_followers.find(username);
-    if (pos != string::npos){
-      args_followers.erase(pos, args.length()+2);
-      exists = true;
-    }
-
-    string args_following;
-    getline(ifs, args_following);
-
-    ofstream ofs(server_id + "/" + args + ".txt");
-    ofs << args_username << "\n" << args_followers << "\n" << args_following << "\n";
-
-    ofs.close();
-
-    if (exists) {
-      reply->set_msg("SUCCESS");
-    }
-    else {
-      reply->set_msg("FAILURE_INVALID_USERNAME");
-    }
-
-    return Status::OK;
-  }
   
   Status Login(ServerContext* context, const Request* request, Reply* reply) override {
     // ------------------------------------------------------------
@@ -169,6 +132,17 @@ class SNSServiceImpl final : public SNSService::Service {
     // or already taken
     // ------------------------------------------------------------
     string username = request->username();
+
+    if (server_type == "master"){
+      Request slave_request;
+      slave_request.set_username(username);
+      ClientContext slave_context;
+      Reply slave_reply;
+
+      Status status = stub_slave -> Login(&slave_context, slave_request, &slave_reply);
+    }
+    
+
     bool exists = false;
 
     DIR *dr;
@@ -201,6 +175,36 @@ class SNSServiceImpl final : public SNSService::Service {
     return Status::OK;
   }
 
+  Status TimeLineSlave(ServerContext* context, const RequestSlave* request, ReplySlave* reply) override {
+    
+
+    string username = request -> username();
+    string clean_msg = request -> msg();
+    string follower = request -> follower();
+    string time = request -> time();
+
+    vector<string> file_msg;
+    ifstream ifs(server_id + "/" + follower + "/" + follower + "_timeline.txt");
+    if (ifs.is_open()){
+      string line_msg;
+      while(getline(ifs, line_msg)){
+        file_msg.push_back(line_msg);
+      }
+    }
+    ifs.close();
+
+    ofstream ofs(server_id + "/" + follower + "/" + follower + "_timeline.txt");
+    ofs << username << " *break* " << clean_msg << " *break* " << time;
+    for (auto k: file_msg){
+      ofs << '\n' << k;
+    }
+    
+    ofs.close();
+
+    reply -> set_msg("SUCCESS");
+    return Status::OK;
+  }
+  
   Status Timeline(ServerContext* context, ServerReaderWriter<Message, Message>* stream) override {
     // ------------------------------------------------------------
     // In this function, you are to write code that handles 
@@ -208,6 +212,8 @@ class SNSServiceImpl final : public SNSService::Service {
     // and then making it available on his/her follower's streams
     // ------------------------------------------------------------
     // ifstream ifs;
+    cout << "Timeline is called" << endl;
+
     Message msg;
     stream->Read(&msg);
     string username = msg.username();
@@ -223,57 +229,73 @@ class SNSServiceImpl final : public SNSService::Service {
         string current_time = ctime(&time_now);
 
         username = recv_msg.username();
-        ifs.open("/" + server_id + "/" + username + ".txt");
-        string followers;
+        ifs.open(server_id + "/" + username + "/" + username + "_followers.csv");
+        vector<string> list_current_followers;
+        vector<string> list_other_followers;
+        string follower;
         int i = 0;
-        while(getline(ifs, followers)){
-          if (i == 1){
-            followers.erase(0, 11 + username.size() + 2);
-            break;
+        while(getline(ifs, follower, ',')){
+          if (((stoi(follower) % 3) + 1) == stoi(curr_id)){
+            list_current_followers.push_back(follower);
           }
-          ++i;
+          else {
+            list_other_followers.push_back(follower);
+          }
         }
         ifs.close();
 
-        if (followers.size() > 0){
-          vector<string> list_followers;
-          size_t pos = 0;
+        string clean_msg = recv_msg.msg();
+        size_t pos = clean_msg.find('\n');
+        if (pos != string::npos){
+          clean_msg.erase(clean_msg.begin()+pos);
+        }
+        
+        pos = current_time.find('\n');
+        if (pos != string::npos){
+          current_time.erase(current_time.begin()+pos);
+        }
 
-          while((pos = followers.find(',')) != string::npos){
-            list_followers.push_back(followers.substr(0, pos));
-            followers.erase(0, pos + 2); // need to delete comma and a space
+        for (auto x: list_current_followers){
+
+          vector<string> file_msg;
+          ifs.open(server_id + "/" + x + "/" + x + "_timeline.txt");
+          if (ifs.is_open()){
+            string line_msg;
+            while(getline(ifs, line_msg)){
+              file_msg.push_back(line_msg);
+            }
           }
+          ifs.close();
 
-          for (auto x: list_followers){
-            vector<string> file_msg;
-            ifs.open("/" + server_id + "/" + x + "_timeline.txt");
-            if (ifs.is_open()){
-              string line_msg;
-              while(getline(ifs, line_msg)){
-                file_msg.push_back(line_msg);
-              }
-            }
-            ifs.close();
+          if (server_type == "master"){
+            RequestSlave slave_request;
+            ClientContext slave_context;
+            slave_request.set_username(username);
+            slave_request.set_msg(clean_msg);
+            slave_request.set_follower(x);
+            slave_request.set_time(current_time);
+            ReplySlave slave_reply;
 
-            string clean_msg = recv_msg.msg();
-            size_t pos = clean_msg.find('\n');
-            if (pos != string::npos){
-              clean_msg.erase(clean_msg.begin()+pos);
-            }
-            
-            pos = current_time.find('\n');
-            if (pos != string::npos){
-              current_time.erase(current_time.begin()+pos);
-            }
-
-            ofstream ofs("/" + server_id + "/" + x + "_timeline.txt");
-            ofs << username << " *break* " << clean_msg << " *break* " << current_time;
-            for (auto k: file_msg){
-              ofs << '\n' << k;
-            }
-            
-            ofs.close();
+            stub_slave -> TimeLineSlave(&slave_context, slave_request, &slave_reply);
           }
+          
+          ofstream ofs(server_id + "/" + x + "/" + x + "_timeline.txt");
+          ofs << username << " *break* " << clean_msg << " *break* " << current_time;
+          for (auto k: file_msg){
+            ofs << '\n' << k;
+          }
+          
+          ofs.close();
+        }
+
+        for (auto x: list_other_followers){
+
+          string dir = server_id + "/other_followers";
+
+          string message = username + " *break* " + clean_msg + " *break* " + current_time;
+
+          ofstream ofs(dir + "/" + x + ".txt");
+          ofs << message << '\n';
         }
       }
     });
@@ -281,7 +303,7 @@ class SNSServiceImpl final : public SNSService::Service {
     thread send_msg_thread([stream](string username, int past_file_size) {
       Message send_msg;
       int new_file_size;
-      string path = "/" + server_id + "/" + username + "_timeline.txt";
+      string path = server_id + "/" + username + "/" + username + "_timeline.txt";
       ifstream ifs;
       int counter = 0;
       bool first_run = true;
@@ -329,7 +351,11 @@ class SNSServiceImpl final : public SNSService::Service {
           }
 
           for (int i = start; i < finish; ++i){
-
+            if (!first_run){
+              if (list_messages[i][0] == username){
+                continue;
+              }
+            }
             send_msg.set_username(list_messages[i][0]);
             send_msg.set_msg(list_messages[i][1]);
             struct tm tm;
@@ -369,6 +395,15 @@ void RunServer(string port_no) {
     cout << "Directory " << server_id << " created!" << endl;
   }
 
+  string dir = server_id + "/other_followers";
+
+  if (mkdir(dir.c_str(), 0777) == -1){
+    cerr << "Directory for this server exists!" << endl;
+  }
+  else {
+    cout << "Directory " << dir << " already exists!" << endl;
+  }
+
   string server_address("localhost:" + port_no); 
   SNSServiceImpl service;
   
@@ -384,7 +419,7 @@ int connectToCoordinator(string hostname_coor, string port_coor, string type, st
 
   auto channel = CreateChannel(hostname_coor + ":" + port_coor, InsecureChannelCredentials());
 
-  unique_ptr<CCService::Stub> stub_coor = CCService::NewStub(channel);
+  stub_coor = CCService::NewStub(channel);
 
   RequestServer request_server;
   request_server.set_id(id);
@@ -402,6 +437,47 @@ int connectToCoordinator(string hostname_coor, string port_coor, string type, st
   }
 
   return -1;
+}
+
+void GetSlave(string type){
+  if (type == "master"){
+    while(true){
+      RequestHost request;
+      request.set_username(curr_id);
+      request.set_type("master");
+      ClientContext context;
+      ReplyHost reply;
+
+      Status status = stub_coor -> getServer(&context, request, &reply);
+
+      if (status.ok() && reply.msg() == "SUCCESS"){
+        slave_host = reply.hostname();
+        slave_port = reply.port_num();
+        auto channel = CreateChannel(slave_host + ":" + slave_port, InsecureChannelCredentials());
+        stub_slave = SNSService::NewStub(channel);
+        break;
+      }
+    }
+  }
+}
+
+void Heartbeat(string type){
+  while(true){
+    RequestHeartBeat request;
+    request.set_id(curr_id);
+    request.set_type(type);
+    ClientContext context;
+    ReplyHeartBeat reply;
+
+    Status status = stub_coor->HeartBeat(&context, request, &reply);
+
+    if (!status.ok() || reply.msg() != "SUCCESS"){
+      cout << "Server Down! Coordinator decided so!\n";
+      exit(0);
+    }
+
+    this_thread::sleep_for(chrono::milliseconds(9000));
+  }
 }
 
 int main(int argc, char** argv) {
@@ -434,11 +510,19 @@ int main(int argc, char** argv) {
 	      cerr << "Invalid Command Line Argument\n";
     }
   }
+  server_type = type;
   SNSServiceImpl service;
 
   int coor = connectToCoordinator(host_coor, port_coor, type, id, port_server);
   if (coor > 0) {
-    RunServer(port_server);
+
+    thread th1(RunServer, port_server);
+    thread th2(GetSlave, type);
+    thread th3(Heartbeat, type);
+
+    th1.join();
+    th2.join();
+    th3.join();
   }
   return 0;
 }

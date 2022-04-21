@@ -100,7 +100,6 @@ void IClient::displayTitle() const
     std::cout << "\n========= TINY SNS CLIENT =========\n";
     std::cout << " Command Lists and Format:\n";
     std::cout << " FOLLOW <username>\n";
-    std::cout << " UNFOLLOW <username>\n";
     std::cout << " LIST\n";
     std::cout << " TIMELINE\n";
     std::cout << "=====================================\n";
@@ -173,6 +172,7 @@ void IClient::displayCommandReply(const std::string& comm, const IReply& reply) 
 		}
 	} else {
 		std::cout << "grpc failed: " << reply.grpc_status.error_message() << std::endl;
+        std::cout << "Reconnecting to the slave server...\n";
 	}
 }
 
@@ -181,21 +181,6 @@ void IClient::toUpperCase(std::string& str) const
     std::locale loc;
     for (std::string::size_type i = 0; i < str.size(); i++)
         str[i] = toupper(str[i], loc);
-}
-
-/*
- * get/displayPostMessage functions will be called in chatmode
- */
-std::string getPostMessage()
-{
-    char buf[MAX_DATA];
-    while (1) {
-	    fgets(buf, MAX_DATA, stdin);
-	    if (buf[0] != '\n')  break;
-    }
-
-    std::string message(buf);
-    return message;
 }
 
 void displayPostMessage(const std::string& sender, const std::string& message, std::time_t& time)

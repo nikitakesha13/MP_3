@@ -7,5 +7,7 @@ using csce438::RequestOtherSynch;
 using csce438::ReplyOtherSynch;
 using csce438::RequestFollow;
 using csce438::ReplyFollow;
+using csce438::RequestTimeline;
+using csce438::ReplyTimeline;
 
 #endif

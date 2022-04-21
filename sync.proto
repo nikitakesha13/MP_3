@@ -5,6 +5,7 @@ import "google/protobuf/timestamp.proto";
 service SYNCService{
     rpc List(RequestOtherSynch) returns (ReplyOtherSynch) {}
     rpc Follow(RequestFollow) returns (ReplyFollow) {}
+    rpc ProcessTimeline(RequestTimeline) returns (ReplyTimeline) {}
 }
 
 message RequestFollow {
@@ -23,4 +24,13 @@ message RequestOtherSynch {
 message ReplyOtherSynch {
     string msg = 1;
     repeated string list_users = 2;
+}
+
+message RequestTimeline {
+    string username = 1;
+    string msg = 2;
+}
+
+message ReplyTimeline {
+    string msg = 1;
 }

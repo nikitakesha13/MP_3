@@ -56,6 +56,10 @@ using csce438::RequestHost;
 using csce438::ReplyHost;
 using csce438::RequestSynchData;
 using csce438::ReplySynchData;
+using csce438::RequestHeartBeat;
+using csce438::ReplyHeartBeat;
+using csce438::RequestSlave;
+using csce438::ReplySlave;
 
 using namespace std;
 

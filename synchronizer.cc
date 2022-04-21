@@ -32,14 +32,62 @@ class Synchronizer final : public SYNCService::Service {
     }
 
     Status Follow(ServerContext* context, const RequestFollow* request, ReplyFollow* reply) override {
+        
         string username = request -> username();
         string user_to_follow = request -> user_to_follow();
 
         for (string dir: type_dir){
-            ofstream ofs(dir + synch_id + "/" + user_to_follow + "/" + user_to_follow + "_followers.csv", ios_base::app);
-            ofs << username << ',';
+            bool exists = false;
+            ifstream ifs(dir + synch_id + "/" + user_to_follow + "/" + user_to_follow + "_followers.csv");
+            if(!ifs.is_open()){
+                continue;
+            }
+            string follower;
+            while(getline(ifs, follower, ',')){
+                if (follower == username){
+                    exists = true;
+                }
+            }
+            ifs.close();
+
+            if (!exists){
+                ofstream ofs(dir + synch_id + "/" + user_to_follow + "/" + user_to_follow + "_followers.csv", ios_base::app);
+                ofs << username << ',';
+                ofs.close();
+            }
+            
+        }
+
+        reply -> set_msg("SUCCESS");
+        return Status::OK;
+    }
+
+    Status ProcessTimeline(ServerContext* context, const RequestTimeline* request, ReplyTimeline* reply) override {
+        
+        string follower = request -> username();
+        string msg = request -> msg();
+
+        for (string dir: type_dir){
+
+            vector<string> file_msg;
+            ifstream ifs(dir + synch_id + "/" + follower + "/" + follower + "_timeline.txt");
+            if (ifs.is_open()){
+                string line_msg;
+                while(getline(ifs, line_msg)){
+                    file_msg.push_back(line_msg);
+                }
+            }
+            ifs.close();
+
+            ofstream ofs(dir + synch_id + "/" + follower + "/" + follower + "_timeline.txt");
+            ofs << msg;
+            for (auto k: file_msg){
+                ofs << '\n' << k;
+            }
+            
             ofs.close();
         }
+        
 
         reply -> set_msg("SUCCESS");
         return Status::OK;
@@ -72,6 +120,54 @@ int connectToCoordinator(string hostname_coor, string port_coor, string port_ser
     return -1;
 }
 
+void HandleTimeline(){
+    while(true){
+        DIR *dr;
+        struct dirent *en;
+        for (string p: type_dir){
+            string path = p + synch_id + "/other_followers";
+            dr = opendir(path.c_str());
+            if (dr) {
+                while((en = readdir(dr)) != NULL){
+                    string temp = en->d_name;
+                    if (temp != "." && temp != ".."){
+                        int pos = temp.find(".txt");
+                        temp.erase(pos, 4);
+
+                        ifstream ifs(path + "/" + temp + ".txt");
+                        string message;
+                        getline(ifs, message);
+                        
+                        RequestTimeline request;
+                        request.set_username(temp);
+                        request.set_msg(message);
+                        ClientContext context;
+                        ReplyTimeline reply;
+
+                        int index;
+
+                        if (synch_stubs[0].first == to_string(stoi(temp) % 3)){
+                            index = 0;
+                        }
+                        else {
+                            index = 1;
+                        }
+
+                        Status status = synch_stubs[index].second -> ProcessTimeline(&context, request, &reply);
+
+                        if (status.ok() && reply.msg() == "SUCCESS"){
+                            remove((path + "/" + temp + ".txt").c_str());
+                        }
+
+                    }
+                    
+                }
+                closedir(dr);
+            }
+        }
+    }
+}
+
 void HandleRequest(){
 
     ifstream ifs;
@@ -79,53 +175,58 @@ void HandleRequest(){
 
     while(true){
         for (string user: current_dir_users){
-            for (string dir: type_dir){
-                ifs.open(dir + synch_id + "/" + user + "/" + user + "_requests.csv");
-                if (!ifs.is_open()){
-                    continue;
+            string dir = "slave_";
+
+            ifs.open(dir + synch_id + "/" + user + "/" + user + "_requests.csv");
+            if (!ifs.is_open()){
+                continue;
+            }
+            
+            vector<string> req_users;
+            string request;
+
+            while(getline(ifs, request, ',')){
+                req_users.push_back(request);
+            }
+
+            ifs.close();
+
+            while (req_users.size() > 0){
+
+                int user_loc = stoi(req_users[0]) % 3;
+                int index;
+                if (synch_stubs[0].first == to_string(user_loc)){
+                    index = 0;
                 }
-                
-                vector<string> req_users;
-                string request;
-
-                while(getline(ifs, request, ',')){
-                    req_users.push_back(request);
+                else {
+                    index = 1;
                 }
 
-                ifs.close();
+                RequestFollow request;
+                request.set_username(user);
+                request.set_user_to_follow(req_users[0]);
 
-                while (req_users.size() > 0){
+                ClientContext context;
+                ReplyFollow reply;
 
-                    int user_loc = stoi(req_users[0]) % 3;
-                    int index;
-                    if (synch_stubs[0].first == to_string(user_loc)){
-                        index = 0;
-                    }
-                    else {
-                        index = 1;
-                    }
+                Status status = synch_stubs[index].second -> Follow(&context, request, &reply);
 
-                    RequestFollow request;
-                    request.set_username(user);
-                    request.set_user_to_follow(req_users[0]);
+                if (status.ok() && reply.msg() == "SUCCESS"){
 
-                    ClientContext context;
-                    ReplyFollow reply;
+                    ofs.open(dir + synch_id + "/" + user + "/" + user + "_following.csv", ios_base::app);
+                    ofs << req_users[0] << ',';
+                    ofs.close();
 
-                    Status status = synch_stubs[index].second -> Follow(&context, request, &reply);
+                    ofs.open("master_" + synch_id + "/" + user + "/" + user + "_following.csv", ios_base::app);
+                    ofs << req_users[0] << ',';
+                    ofs.close();
 
-                    if (status.ok() && reply.msg() == "SUCCESS"){
+                    req_users.erase(req_users.begin());
 
-                        req_users.erase(req_users.begin());
-
-                        ofs.open(dir + synch_id + "/" + user + "/" + user + "_following.csv", ios_base::app);
-                        ofs << req_users[0] << ',';
-                        ofs.close();
-
-                    }
                 }
 
                 remove((dir + synch_id + "/" + user + "/" + user + "_requests.csv").c_str());
+                remove(("master_" + synch_id + "/" + user + "/" + user + "_requests.csv").c_str());
             }
         }
         this_thread::sleep_for(chrono::milliseconds(3000));
@@ -182,10 +283,13 @@ void List(){
             if (dr) {
                 while((en = readdir(dr)) != NULL){
                     string temp = en->d_name;
-                    if (find(list_users.begin(), list_users.end(), temp) == list_users.end()){
-                        list_users.push_back(temp);
-                        current_dir_users.push_back(temp);
+                    if (temp != "." && temp != ".." && temp != "other_followers"){
+                        if (find(list_users.begin(), list_users.end(), temp) == list_users.end()){
+                            list_users.push_back(temp);
+                            current_dir_users.push_back(temp);
+                        }
                     }
+                    
                 }
                 closedir(dr);
             }
@@ -231,7 +335,7 @@ void GetOtherInfo(){
                     port_nums.push_back(reply_synch.port_num()[i]);
                     string chan_name = hostnames[hostnames.size()-1] + ":" + port_nums[port_nums.size()-1];
                     synch_chans.push_back(CreateChannel(chan_name, InsecureChannelCredentials()));
-                    synch_stubs.push_back(make_pair(reply_synch.id()[i], SYNCService::NewStub(synch_chans[synch_chans.size()-1])));
+                    synch_stubs.push_back(make_pair(to_string(stoi(reply_synch.id()[i])-1), SYNCService::NewStub(synch_chans[synch_chans.size()-1])));
                     cout << "ID: " << ids[ids.size()-1] << ", Hostname: " << hostnames[hostnames.size()-1] << ", Port:" << port_nums[port_nums.size()-1] << endl;
                 }
             }      
@@ -279,6 +383,7 @@ int main(int argc, char** argv){
         thread th4(ListOther);
         thread th5(WriteToList);
         thread th6(HandleRequest);
+        thread th7(HandleTimeline);
 
         th1.join();
         th2.join();
@@ -286,6 +391,7 @@ int main(int argc, char** argv){
         th4.join();
         th5.join();
         th6.join();
+        th7.join();
     }
     return 0;
 }

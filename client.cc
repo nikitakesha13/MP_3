@@ -19,12 +19,15 @@ class Client : public IClient
         virtual void processTimeline();
         void send_handle_loop();
         void recv_handle_loop();
+        void askCoordinator();
+        string getPostMessage();
     private:
         string hostname_coor;
         string username;
         string port_coor;
         string host_server;
         string port_server;
+        bool reconnect;
         
         // You can have an instance of the client stub
         // as a member variable.
@@ -71,6 +74,7 @@ int Client::connectToCoordinator(){
 
     RequestHost request_host;
     request_host.set_username(username);
+    request_host.set_type("user");
     ClientContext context;
     ReplyHost reply_host;
 
@@ -97,6 +101,8 @@ int Client::connectToServer(){
     Reply reply;
 
     Status status = stub_server->Login(&context, request, &reply);
+
+    reconnect = false;
 
     if (status.ok()){
         return 1;
@@ -146,10 +152,6 @@ IReply Client::processCommand(std::string& input)
         status = stub_server->Follow(&context, request, &reply);
     }
 
-    else if (command == "UNFOLLOW"){
-        status = stub_server->UnFollow(&context, request, &reply);
-    }
-
     else if (command == "TIMELINE"){
         ire.grpc_status = Status::OK;
         ire.comm_status = SUCCESS;
@@ -178,7 +180,19 @@ IReply Client::processCommand(std::string& input)
         }
     } 
     else {
-        ire.comm_status = FAILURE_UNKNOWN;
+        RequestHost request_host;
+        request_host.set_username(username);
+        request_host.set_type("user");
+        ClientContext context;
+        ReplyHost reply_host;
+
+        Status status = stub_coor->getServer(&context, request_host, &reply_host);
+
+        if (status.ok()){
+            host_server = reply_host.hostname();
+            port_server = reply_host.port_num();
+        }
+        connectToServer();
     }
     
     return ire;
@@ -188,46 +202,87 @@ void Client::send_handle_loop(){
     Message send_msg;
 
     while(1){
-        string msg_str = getPostMessage();
-        send_msg.set_username(username);
-        send_msg.set_msg(msg_str);
+        if (reconnect == true){
+            break;
+        }
+        else {
+            string msg_str = getPostMessage();
+            if (reconnect == true){
+                break;
+            }
+            send_msg.set_username(username);
+            send_msg.set_msg(msg_str);
 
-        stream_->Write(send_msg);
+            stream_->Write(send_msg);
+        }
     }
+}
+
+string Client::getPostMessage()
+{
+    char buf[MAX_DATA];
+    while (true) {
+	    fgets(buf, MAX_DATA, stdin);
+        if (reconnect == true){
+            break;
+        }
+	    if (buf[0] != '\n')  break;
+    }
+
+    std::string message(buf);
+    return message;
 }
 
 void Client::recv_handle_loop(){
     Message recv_msg;
     while(1){
-        if (stream_->Read(&recv_msg) > 0){
-            string sender = recv_msg.username();
-            string msg = recv_msg.msg();
-            time_t time = TimeUtil::TimestampToTimeT(recv_msg.timestamp());
-            displayPostMessage(sender, msg, time);
+        if (reconnect == true){
+            break;
+        }
+        else {
+            if (stream_->Read(&recv_msg) > 0){
+                string sender = recv_msg.username();
+                string msg = recv_msg.msg();
+                time_t time = TimeUtil::TimestampToTimeT(recv_msg.timestamp());
+                displayPostMessage(sender, msg, time);
+            }
         }
         
     }
 }
 
+void Client::askCoordinator(){
+
+    while(true){
+        RequestHost request_host;
+        request_host.set_username(username);
+        request_host.set_type("user");
+        ClientContext context;
+        ReplyHost reply_host;
+
+        Status status = stub_coor->getServer(&context, request_host, &reply_host);
+
+        if (status.ok()){
+            // cout << "Verifing the server" << endl;
+            if (host_server != reply_host.hostname()){
+                host_server = reply_host.hostname();
+            }
+            if (port_server != reply_host.port_num()){
+                port_server = reply_host.port_num();
+                reconnect = true;
+                connectToServer();
+                break;
+            }
+            // cout << "The server is the same\n";
+        }
+
+        this_thread::sleep_for(chrono::milliseconds(1000));
+    }
+    
+}
+
 void Client::processTimeline()
 {
-	// ------------------------------------------------------------
-    // In this function, you are supposed to get into timeline mode.
-    // You may need to call a service method to communicate with
-    // the server. Use getPostMessage/displayPostMessage functions
-    // for both getting and displaying messages in timeline mode.
-    // You should use them as you did in hw1.
-	// ------------------------------------------------------------
-
-    // ------------------------------------------------------------
-    // IMPORTANT NOTICE:
-    //
-    // Once a user enter to timeline mode , there is no way
-    // to command mode. You don't have to worry about this situation,
-    // and you can terminate the client program by pressing
-    // CTRL-C (SIGINT)
-	// ------------------------------------------------------------
-
     ClientContext context;
     Message msg;
     msg.set_username(username);
@@ -236,7 +291,9 @@ void Client::processTimeline()
 
     thread send_msg(&Client::send_handle_loop, this);
     thread recv_msg(&Client::recv_handle_loop, this);
+    thread askCoordinator(&Client::askCoordinator, this);
 
     send_msg.join();
-    recv_msg.join();
+    recv_msg.detach();
+    askCoordinator.join();
 }

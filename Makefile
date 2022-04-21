@@ -39,7 +39,7 @@ synchronizer: ccs.pb.o ccs.grpc.pb.o sync.pb.o sync.grpc.pb.o synchronizer.o
 	$(PROTOC) --cpp_out=. $<
 
 clean:
-	rm -f -R *.txt *.csv *.o *.pb.cc *.pb.h client server coordinator synchronizer master_1 master_2 master_3 list_1 list_2 list_3
+	rm -f -R *.txt *.csv *.o *.pb.cc *.pb.h client server coordinator synchronizer master_1 master_2 master_3 slave_1 slave_2 slave_3 list_1 list_2 list_3
 
 
 # The following is to test your system and ensure a smoother experience.

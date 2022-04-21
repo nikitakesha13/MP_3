@@ -10,11 +10,19 @@ service CCService{
   rpc getServer (RequestHost) returns (ReplyHost) {}
   rpc getFollowerSynch (RequestSynchData) returns (ReplySynchData) {}
   rpc addServer (RequestServer) returns (ReplyServer) {}
+  rpc HeartBeat (RequestHeartBeat) returns (ReplyHeartBeat) {}
 }
 
 // The request definition
 message RequestHost {
     string username = 1;
+    string type = 2;
+}
+
+message ReplyHost {
+    string msg = 1;
+    string hostname = 2;
+    string port_num = 3;
 }
 
 message RequestServer {
@@ -23,20 +31,22 @@ message RequestServer {
     string type = 3;
 }
 
-message RequestSynchData {
-    string id = 1;
-}
-
-// The response definition
-message ReplyHost {
-    string msg = 1;
-    string hostname = 2;
-    string port_num = 3;
-}
-
 message ReplyServer {
     string msg = 1;
     string name = 2;
+}
+
+message RequestHeartBeat {
+    string id = 1;
+    string type = 2;
+}
+
+message ReplyHeartBeat {
+    string msg = 1;
+}
+
+message RequestSynchData {
+    string id = 1;
 }
 
 message ReplySynchData {
